@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+snapshots_light/
+results/
+*.pth
+*.pt
+
+/outputs/
