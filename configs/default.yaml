@@ -1,0 +1,118 @@
+# 默认使用修正后的七级 DEA 主干与独立的 A/B 预测头。
+# D=7、S=2、隐藏宽度32；DEA 残差块前将27通道映射到32通道。
+enhancement_backbone: dea
+# legacy_cnn 仅复现旧源码和旧检查点，包括首级 B 共享行为。
+# 位平面候选：binary、gray、learnable、reliable；当前仅实现 binary。
+bit_mode: binary
+# 增强引导候选：none、snr、reliability；当前仅实现 none。
+enhancement_guidance: none
+
+data:
+  root: ../model/dataset/SICE/SIMI/train
+  image_size: 512
+  num_workers: 4
+  shuffle: true
+  pin_memory: true
+  drop_last: false
+  # 默认使用稳定文件排序，再由带独立随机状态的采样器打乱。
+  legacy_order: false
+
+runtime:
+  device: cuda:0
+  seed: 1143
+  deterministic: true
+
+# 日志与权重统一存放于此；命令行 --output-dir 可切换完整实验目录。
+output:
+  root: outputs
+
+# CUDA 训练采用自动混合精度；CPU 自动沿用 FP32，验证和指标继续使用 FP32。
+amp:
+  enabled: true
+  # 可选 float16、bfloat16；FP16 使用动态梯度缩放，BF16 不需要缩放。
+  dtype: float16
+  # SIMI 损失权重较大，初始缩放使用较保守的值，随后自动调整。
+  init_scale: 64.0
+  growth_factor: 2.0
+  backoff_factor: 0.5
+  growth_interval: 2000
+
+train:
+  # enhancement：仅增强；denoising：冻结增强后训练去噪；joint：原始双分支训练。
+  mode: joint
+  batch_size: 8
+  epochs: 500
+  # DEA 块在反向时重新计算中间特征，使3090支持batch8；不改变网络及loss。
+  # 仅作用于启用梯度的DEA训练，推理与legacy_cnn不使用该策略。
+  activation_checkpointing: true
+  lr: 0.00001
+  weight_decay: 0.0001
+  adamw_betas: [0.9, 0.999]
+  adamw_eps: 0.00000001
+  adamw_amsgrad: false
+  grad_clip_norm: 0.1
+  display_iter: 100
+  snapshots_folder: outputs/weights
+  load_pretrain: false
+  # 分阶段切换时可设为 false，只加载模型权重并使用当前 YAML 的优化器参数。
+  resume_optimizers: true
+  # full：完整续训；weights：新阶段仅载权重；legacy：旧检查点权重及优化器热启动。
+  resume_mode: full
+  pretrain_dir: ""
+
+# 每个 epoch 结束后验证，参考图像仅用于指标与最佳权重选择。
+# PSNR、SSIM 越高越好，LPIPS 越低越好；三个最佳权重独立更新。
+validation:
+  enabled: true
+  # 使用官方预训练特征及 v0.1 校准权重；评价器不参与模型训练。
+  lpips_net: alex
+  # 每轮按以下顺序评估全部测试图像，保留各数据集原始尺寸。
+  datasets:
+    LOLv1:
+      low_dir: ../model/dataset/LOLv1/Test/input
+      high_dir: ../model/dataset/LOLv1/Test/target
+    LOLv2real:
+      low_dir: ../model/dataset/LOLv2/Real_captured/Test/Low
+      high_dir: ../model/dataset/LOLv2/Real_captured/Test/Normal
+    LOLv2syn:
+      low_dir: ../model/dataset/LOLv2/Synthetic/Test/Low
+      high_dir: ../model/dataset/LOLv2/Synthetic/Test/Normal
+    LSRWhuawei:
+      low_dir: ../model/dataset/LSRW/Eval/Huawei/low
+      high_dir: ../model/dataset/LSRW/Eval/Huawei/high
+    LSRWNikon:
+      low_dir: ../model/dataset/LSRW/Eval/Nikon/low
+      high_dir: ../model/dataset/LSRW/Eval/Nikon/high
+    SICE:
+      low_dir: ../model/dataset/SICE/SIMI/part2_eval512/low
+      high_dir: ../model/dataset/SICE/SIMI/part2_eval512/high
+
+scheduler:
+  step_size: 250
+  gamma: 0.99
+
+# 保留原始损失公式、权重及归约运算顺序。
+# 归一化 RGB 使用 1.0；仅历史实验可显式改为 255.0。
+loss:
+  patch_size: 4
+  brightness: 0.8
+  smooth_a_weight: 1000.0
+  smooth_b_weight: 5000.0
+  exposure_weight: 5.0
+  local_color_weight: 1000.0
+  global_color_weight: 1500.0
+  denoising_ssim_weight: 10.0
+  denoising_gradient_weight: 40.0
+  denoising_smooth_weight: 1.0
+  denoising_scale: 10.0
+  ssim_data_range: 1.0
+
+# 与训练共用 runtime.device；命令行参数优先于这些默认值。
+inference:
+  checkpoint: ""
+  input: ""
+  output: results
+  gt: ""
+  stage: denoising
+  benchmark: true
+  warmup: 3

@@ -1,0 +1,7 @@
+# 复用现有 ild-net 环境中的 PyTorch 和 CUDA 安装。
+torch
+torchvision
+numpy
+Pillow
+pytorch-msssim==1.0.0
+PyYAML
